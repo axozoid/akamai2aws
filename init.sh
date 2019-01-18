@@ -10,10 +10,10 @@
 EDGE_FILE="${HOME}/.edgerc"
 touch ${EDGE_FILE}
 echo "[default]" >> ${EDGE_FILE}
-echo "host = AKAMAI_HOST" >> ${EDGE_FILE}
-echo "host = AKAMAI_CLIENT_TOKEN" >> ${EDGE_FILE}
-echo "host = AKAMAI_CLIENT_SECRET" >> ${EDGE_FILE}
-echo "host = AKAMAI_ACCESS_TOKEN" >> ${EDGE_FILE}
+echo "host = ${AKAMAI_HOST}" >> ${EDGE_FILE}
+echo "client_token = ${AKAMAI_CLIENT_TOKEN}" >> ${EDGE_FILE}
+echo "client_secret = ${AKAMAI_CLIENT_SECRET}" >> ${EDGE_FILE}
+echo "access_token = ${AKAMAI_ACCESS_TOKEN}" >> ${EDGE_FILE}
 
 # run the script
 go run /go/src/akamai-ip-range/app.go
