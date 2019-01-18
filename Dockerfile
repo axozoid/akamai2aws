@@ -1,12 +1,19 @@
-FROM golang:1.11-alpine3.8
-RUN apk add curl bash jq git --no-cache
+FROM golang:1.11-alpine3.8 as builder
+RUN apk add git --no-cache
 
 RUN mkdir -p /go/src/akamai-ip-range
 WORKDIR /go/src/akamai-ip-range
 
 COPY app.go /go/src/akamai-ip-range/app.go
-COPY init.sh /go/src/akamai-ip-range/init.sh
 RUN go get -d -v .
+RUN CGO_ENABLED=0 go build -o /go/src/akamai-ip-range/akamai2aws /go/src/akamai-ip-range/app.go
+
+# final image
+FROM alpine:3.8
+RUN apk add bash --no-cache
+RUN mkdir /app
+COPY --from=builder /go/src/akamai-ip-range/akamai2aws /app/akamai2aws
+COPY init.sh /app/init.sh
 
 # The following variables must be supplied in order to use Akamai's API:
 #
@@ -29,4 +36,4 @@ RUN go get -d -v .
 #
 # (*) - required. 
 
-CMD ["/go/src/akamai-ip-range/init.sh"]
+CMD ["/app/init.sh"]
