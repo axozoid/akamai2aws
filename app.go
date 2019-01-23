@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"net/http"
 	"os"
 	"regexp"
 	s "strings"
@@ -24,7 +25,8 @@ const (
 	logLevelError   = "error"
 	logLevelSilence = "silence"
 
-	sgRulesLimit = 60
+	// sgRulesLimit = 60
+	// something to consider in the future
 	// https://docs.aws.amazon.com/vpc/latest/userguide/amazon-vpc-limits.html#vpc-limits-security-groups
 )
 
@@ -46,10 +48,6 @@ type AkamaiMap struct {
 	Service               string
 	Shared                bool
 	SureRouteName         string
-}
-
-type akamaiMapAcknoledgeResponse struct {
-	_ struct{}
 }
 
 var (
@@ -89,22 +87,6 @@ func outputMsg(msg, level string) {
 			fmt.Println(msg)
 		}
 	}
-
-	// switch level {
-	// case logLevelInfo:
-	// 	if currentLogLevel != logLevelSilence {
-	// 		fmt.Println(msg)
-	// 	}
-
-	// case logLevelDebug:
-	// 	if debugMode {
-	// 		log.Println(msg)
-	// 	}
-	// case logLevelError:
-	// 	sendNotification()
-	// 	log.Fatalln("ERROR:", msg)
-	// }
-
 }
 
 // initAndCheckEnvars performs initialization and some checks against passed variables
@@ -139,23 +121,27 @@ func akamaiMakeRequest(address, method string) []byte {
 	config, err := edgegrid.Init("~/.edgerc", "default")
 	if err != nil {
 		outputMsg("Unable to init an Akamai client.", logLevelError)
-		//log.Fatalln("Error: Unable to init Akamai client.")
 	}
 
 	req, err := client.NewRequest(config, s.ToUpper(method), address, nil)
 	if err != nil {
 		outputMsg("Unable to create a new request.", logLevelError)
-		//log.Fatalln("Error: Unable to create a new request.")
 	}
 
 	resp, err := client.Do(config, req)
 	if err != nil {
+		//	fmt.Printf("DEBUG: %+#v\n", err)
 		outputMsg("Unable to perform an HTTP request to an Akamai endpoint.", logLevelError)
-		//log.Fatalln("Error: Unable to perform an HTTP request.")
 	}
-	defer resp.Body.Close()
+	defer func(r *http.Response) {
+		q := r.Body.Close()
+		if q != nil {
+			outputMsg("Unable to close the body.", logLevelError)
+		}
+	}(resp)
+
+	//	defer resp.Body.Close()
 	body, _ := ioutil.ReadAll(resp.Body)
-	//fmt.Println(string(byt))
 	return body
 }
 
@@ -164,7 +150,6 @@ func getAkamaiMap(reqAddr string) (akamaiMapToReturn AkamaiMap) {
 	err := json.Unmarshal(akmReq, &akamaiMapToReturn)
 	if err != nil {
 		outputMsg("Unable to parse the response body.", logLevelError)
-		//log.Fatalln("Error: Unable to parse the response body.")
 	}
 	return akamaiMapToReturn
 }
@@ -222,18 +207,17 @@ func sliceContainsElement(sliceToCheck []string, elem string) bool {
 	elemSlice := []string{elem}
 	if x := findDiff(sliceToCheck, elemSlice); len(x) == 1 && x[0] == elem {
 		return false
-	} else {
-		return true
 	}
+	return true
+
 }
 
-func slicesAreEqual(slice1, slice2 []string) bool {
-	if findDiff(slice1, slice2) == nil && findDiff(slice2, slice1) == nil && len(slice1) == len(slice2) {
-		return true
-	} else {
-		return false
-	}
-}
+// func slicesAreEqual(slice1, slice2 []string) bool {
+// 	if findDiff(slice1, slice2) == nil && findDiff(slice2, slice1) == nil && len(slice1) == len(slice2) {
+// 		return true
+// 	}
+// 	return false
+// }
 
 func returnDiff(oldSlice, newSlice []string) (addedItems, removedItems []string) {
 	addedItems = findDiff(oldSlice, newSlice)
@@ -242,10 +226,10 @@ func returnDiff(oldSlice, newSlice []string) (addedItems, removedItems []string)
 }
 
 // extractIP returns a string value containing an IP address
-func extractIP(inpStr string) string {
-	ipAddrRegexp := regexp.MustCompile(`([\d]){1,3}\.([\d]){1,3}\.([\d]){1,3}\.([\d]){1,3}`)
-	return ipAddrRegexp.FindString(inpStr)
-}
+// func extractIP(inpStr string) string {
+// 	ipAddrRegexp := regexp.MustCompile(`([\d]){1,3}\.([\d]){1,3}\.([\d]){1,3}\.([\d]){1,3}`)
+// 	return ipAddrRegexp.FindString(inpStr)
+// }
 
 // validAWSregion returns true if a string representing a region
 // matches format from
@@ -330,14 +314,8 @@ func editSecurityGroupRules(ec2object *ec2.EC2, group *ec2.DescribeSecurityGroup
 
 	if err != nil {
 		if aerr, ok := err.(awserr.Error); ok {
-			switch aerr.Code() {
-			default:
-				outputMsg("Security group update failed: "+aerr.Error(), logLevelError)
-			}
-		} else {
-			// Print the error, cast err to awserr.Error to get the Code and
-			// Message from an error.
-			outputMsg("Unable to update security group rules: "+err.Error(), logLevelError)
+			msgTxt := fmt.Sprintf("Security group update failed weith the code: '%s' and message: '%s'", aerr.Code(), aerr.Message())
+			outputMsg(msgTxt, logLevelError)
 		}
 		//return
 	} else {
