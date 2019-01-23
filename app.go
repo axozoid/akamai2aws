@@ -344,8 +344,9 @@ func main() {
 
 	// create a new AWS session object
 	awsSession, err := session.NewSession(&aws.Config{
-		Region:     aws.String(*awsRegion),
-		MaxRetries: aws.Int(3),
+		CredentialsChainVerboseErrors: aws.Bool(true),
+		Region:                        aws.String(*awsRegion),
+		MaxRetries:                    aws.Int(3),
 	})
 	if err != nil {
 		outputMsg("Can't create AWS session.", logLevelError)
