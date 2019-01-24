@@ -314,7 +314,7 @@ func editSecurityGroupRules(ec2object *ec2.EC2, group *ec2.DescribeSecurityGroup
 
 	if err != nil {
 		if aerr, ok := err.(awserr.Error); ok {
-			msgTxt := fmt.Sprintf("Security group update failed weith the code: '%s' and message: '%s'", aerr.Code(), aerr.Message())
+			msgTxt := fmt.Sprintf("Security group update failed with the code: '%s' and message: '%s'", aerr.Code(), aerr.Message())
 			outputMsg(msgTxt, logLevelError)
 		}
 		//return
@@ -362,19 +362,9 @@ func main() {
 
 	if errEC2 != nil {
 		if aerr, ok := errEC2.(awserr.Error); ok {
-			outputMsg("Can't describe security groups: "+aerr.Message(), logLevelError)
+			outputMsg("An error occurred while querying security groups: "+aerr.Message(), logLevelError)
 		}
 
-	}
-
-	if len(resEC2.SecurityGroups) == 0 {
-		outputMsg("Security groups not found.", logLevelError)
-	} else {
-		// showing a notice if not all SGs are found
-		if df := len(secGroups) - len(resEC2.SecurityGroups); df > 0 {
-			tmp := fmt.Sprintf("Warning: %d of %d security groups not found.", df, len(secGroups))
-			outputMsg(tmp, logLevelInfo)
-		}
 	}
 
 	// ------------------------------------------
