@@ -63,6 +63,7 @@ var (
 	mapAddress        = kingpin.Flag("mapaddress", "URL of Akamai endpoint.").Default("/siteshield/v1/maps/").Envar("AKMGOAPP_MAP_ADDR").String()
 	awsRegion         = kingpin.Flag("awsregion", "AWS region to operate in.").Default("ap-southeast-2").Envar("AKMGOAPP_AWS_REGION").String()
 	ackMap            = kingpin.Flag("ackmap", "If true, the map will be acknowledged.").Default("false").Envar("AKMGOAPP_ACK_MAP").Bool()
+	removeZeroes      = kingpin.Flag("removezeroes", "If true, CIDRs like 0.0.0.0/0 and ::/0 will be removed.").Default("false").Envar("AKMGOAPP_REMOVE_ZEROES").Bool()
 
 	tmplRemoveCidrOk   = "REMOVED from SG '%s': Protocol=%s, Port=%d, CIDR=%s."
 	tmplRemoveCidrFail = "Unable to remove '%s' from security group '%s'. Error code: '%s', message: '%s'"
@@ -500,9 +501,11 @@ func main() {
 				editSecurityGroupRules(svcEC2, resEC2, idx, 443, 443, ipAddr, sgRuleDescription, "tcp", false, debugMode)
 			}
 		}
-		// removing wide IP ranges
-		removeIpv4CIDR(svcEC2, resEC2, idx, "0.0.0.0/0", debugMode)
-		removeIpv6CIDR(svcEC2, resEC2, idx, "::/0", debugMode)
+		if *removeZeroes {
+			// removing wide IP ranges
+			removeIpv4CIDR(svcEC2, resEC2, idx, "0.0.0.0/0", debugMode)
+			removeIpv6CIDR(svcEC2, resEC2, idx, "::/0", debugMode)
+		}
 	} // finished loop
 
 	// ------------------------------------------
