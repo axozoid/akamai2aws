@@ -30,6 +30,7 @@ The following environment variables are accepted when using a Docker image creat
 |AKMGOAPP_MAP_ADDR|/siteshield/v1/maps/|no|Akamai's endpoint URL|
 |AKMGOAPP_AWS_REGION|ap-southeast-2|no|AWS region to operate in|
 |AKMGOAPP_ACK_MAP|false|no|If set to `true`, the map will be acknowledged after syncing|
+|AKMGOAPP_REMOVE_ZEROES|false|no|If true, CIDRs like 0.0.0.0/0 and ::/0 will be removed from the SG|
 
 Variable `AKMGOAPP_LOG_LEVEL` might have these values:
 * `silence` - only errors will be printed;
