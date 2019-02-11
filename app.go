@@ -63,6 +63,12 @@ var (
 	mapAddress        = kingpin.Flag("mapaddress", "URL of Akamai endpoint.").Default("/siteshield/v1/maps/").Envar("AKMGOAPP_MAP_ADDR").String()
 	awsRegion         = kingpin.Flag("awsregion", "AWS region to operate in.").Default("ap-southeast-2").Envar("AKMGOAPP_AWS_REGION").String()
 	ackMap            = kingpin.Flag("ackmap", "If true, the map will be acknowledged.").Default("false").Envar("AKMGOAPP_ACK_MAP").Bool()
+
+	tmplRemoveCidrOk   = "REMOVED from SG '%s': Protocol=%s, Port=%d, CIDR=%s."
+	tmplRemoveCidrFail = "Unable to remove '%s' from security group '%s'. Error code: '%s', message: '%s'"
+	tmplAddSgRuleOk    = "ADDED to SG %s: Protocol=%s, FromPort=%d, ToPort=%d, CIDR=%s."
+	tmplRemoveSgRuleOk = "REMOVED from SG %s: Protocol=%s, FromPort=%d, ToPort=%d, CIDR=%s."
+	tmplUpdateSgFail   = "Security group update failed with the code: '%s' and message: '%s'"
 )
 
 func sendNotification() {
@@ -263,10 +269,12 @@ func printSgInfo(grp *ec2.SecurityGroup, expandRules bool) {
 func extractCIDRs(securityGroup *ec2.SecurityGroup, matchFromPort int64) []string {
 	varToSaveCIDRs := []string{}
 	for _, sgPerm := range securityGroup.IpPermissions {
-		// fmt.Println("--->>>", sgPerm) // debug
-		if matchFromPort == *sgPerm.FromPort {
-			for _, ipBlock := range sgPerm.IpRanges {
-				varToSaveCIDRs = append(varToSaveCIDRs, *ipBlock.CidrIp)
+		// custom protocols in a SG don't have fields with ports.
+		if sgPerm.FromPort != nil {
+			if matchFromPort == *sgPerm.FromPort {
+				for _, ipBlock := range sgPerm.IpRanges {
+					varToSaveCIDRs = append(varToSaveCIDRs, *ipBlock.CidrIp)
+				}
 			}
 		}
 	}
@@ -302,19 +310,19 @@ func editSecurityGroupRules(ec2object *ec2.EC2, group *ec2.DescribeSecurityGroup
 			IpPermissions: ipPerm,
 		}
 		_, err = ec2object.AuthorizeSecurityGroupIngress(input)
-		msg = fmt.Sprintf("ADDED to SG name: %s, Protocol: %s, FromPort: %d, ToPort: %d, CIDR: %s.", *group.SecurityGroups[groupIndex].GroupId, prot, portFrom, portTo, cidr)
+		msg = fmt.Sprintf(tmplAddSgRuleOk, *group.SecurityGroups[groupIndex].GroupId, prot, portFrom, portTo, cidr)
 	} else {
 		input := &ec2.RevokeSecurityGroupIngressInput{
 			GroupId:       aws.String(*group.SecurityGroups[groupIndex].GroupId),
 			IpPermissions: ipPerm,
 		}
 		_, err = ec2object.RevokeSecurityGroupIngress(input)
-		msg = fmt.Sprintf("REMOVED from SG name: %s, Protocol: %s, FromPort: %d, ToPort: %d, CIDR: %s.", *group.SecurityGroups[groupIndex].GroupId, prot, portFrom, portTo, cidr)
+		msg = fmt.Sprintf(tmplRemoveSgRuleOk, *group.SecurityGroups[groupIndex].GroupId, prot, portFrom, portTo, cidr)
 	}
 
 	if err != nil {
 		if aerr, ok := err.(awserr.Error); ok {
-			msgTxt := fmt.Sprintf("Security group update failed with the code: '%s' and message: '%s'", aerr.Code(), aerr.Message())
+			msgTxt := fmt.Sprintf(tmplUpdateSgFail, aerr.Code(), aerr.Message())
 			outputMsg(msgTxt, logLevelError)
 		}
 		//return
@@ -324,6 +332,100 @@ func editSecurityGroupRules(ec2object *ec2.EC2, group *ec2.DescribeSecurityGroup
 			fmt.Println("[Success]", msg)
 		}
 	}
+}
+
+// removeIpv4CIDR removes a given IPv4 CIDR block
+func removeIpv4CIDR(ec2object *ec2.EC2, group *ec2.DescribeSecurityGroupsOutput, groupIndex int, CIDRtoRemove string, verbose bool) {
+	var err error
+	var msg string
+	// loop through protocols
+	for _, sgPerm := range group.SecurityGroups[groupIndex].IpPermissions {
+		// loop through CIDR blocks
+		for _, ipBlock := range sgPerm.IpRanges {
+			// checking if the CIDR exist
+			if *ipBlock.CidrIp == CIDRtoRemove {
+				ipPerm := []*ec2.IpPermission{
+					{
+						IpProtocol: aws.String(*sgPerm.IpProtocol),
+						FromPort:   aws.Int64(*sgPerm.FromPort),
+						IpRanges: []*ec2.IpRange{
+							{
+								CidrIp: aws.String(CIDRtoRemove),
+							},
+						},
+						ToPort: aws.Int64(*sgPerm.ToPort),
+					},
+				}
+
+				input := &ec2.RevokeSecurityGroupIngressInput{
+					GroupId:       aws.String(*group.SecurityGroups[groupIndex].GroupId),
+					IpPermissions: ipPerm,
+				}
+
+				_, err = ec2object.RevokeSecurityGroupIngress(input)
+
+				if err != nil {
+					if aerr, ok := err.(awserr.Error); ok {
+						msg = fmt.Sprintf(tmplRemoveCidrFail, CIDRtoRemove, *group.SecurityGroups[groupIndex].GroupId, aerr.Code(), aerr.Message())
+						outputMsg(msg, logLevelError)
+					}
+				} else {
+					msg = fmt.Sprintf(tmplRemoveCidrOk, *group.SecurityGroups[groupIndex].GroupId, *sgPerm.IpProtocol, *sgPerm.FromPort, CIDRtoRemove)
+					if verbose {
+						outputMsg(msg, logLevelInfo)
+					}
+				}
+			} // exists
+		} // end loop through CIDR blocks
+	} // end loop through protocols
+
+}
+
+// removeIpv6CIDR removes a given IPv6 CIDR block
+func removeIpv6CIDR(ec2object *ec2.EC2, group *ec2.DescribeSecurityGroupsOutput, groupIndex int, CIDRtoRemove string, verbose bool) {
+	var err error
+	var msg string
+	// loop through protocols
+	for _, sgPerm := range group.SecurityGroups[groupIndex].IpPermissions {
+		// loop through CIDR blocks
+		for _, ipBlock := range sgPerm.Ipv6Ranges {
+			// checking if the CIDR exist
+			if *ipBlock.CidrIpv6 == CIDRtoRemove {
+				ipPerm := []*ec2.IpPermission{
+					{
+						IpProtocol: aws.String(*sgPerm.IpProtocol),
+						FromPort:   aws.Int64(*sgPerm.FromPort),
+						Ipv6Ranges: []*ec2.Ipv6Range{
+							{
+								CidrIpv6: aws.String(CIDRtoRemove),
+							},
+						},
+						ToPort: aws.Int64(*sgPerm.ToPort),
+					},
+				}
+
+				input := &ec2.RevokeSecurityGroupIngressInput{
+					GroupId:       aws.String(*group.SecurityGroups[groupIndex].GroupId),
+					IpPermissions: ipPerm,
+				}
+
+				_, err = ec2object.RevokeSecurityGroupIngress(input)
+
+				if err != nil {
+					if aerr, ok := err.(awserr.Error); ok {
+						msg = fmt.Sprintf(tmplRemoveCidrFail, CIDRtoRemove, *group.SecurityGroups[groupIndex].GroupId, aerr.Code(), aerr.Message())
+						outputMsg(msg, logLevelError)
+					}
+				} else {
+					msg = fmt.Sprintf(tmplRemoveCidrOk, *group.SecurityGroups[groupIndex].GroupId, *sgPerm.IpProtocol, *sgPerm.FromPort, CIDRtoRemove)
+					if verbose {
+						outputMsg(msg, logLevelInfo)
+					}
+				}
+			} // exists
+		} // end loop through CIDR blocks
+	} // end loop through protocols
+
 }
 
 func main() {
@@ -388,7 +490,7 @@ func main() {
 			}
 		}
 
-		// removing CIDRs from AWS SG that have been deleted from Akamai
+		// removing CIDRs from AWS SG that have been deleted from last map's acknowledgement
 		_, removedCIDR := returnDiff(akamaiMapReady.CurrentCidrs, akamaiMapReady.ProposedCidrs)
 		for _, ipAddr := range removedCIDR {
 			if sliceContainsElement(cidrsPort80, ipAddr) {
@@ -398,7 +500,9 @@ func main() {
 				editSecurityGroupRules(svcEC2, resEC2, idx, 443, 443, ipAddr, sgRuleDescription, "tcp", false, debugMode)
 			}
 		}
-
+		// removing wide IP ranges
+		removeIpv4CIDR(svcEC2, resEC2, idx, "0.0.0.0/0", debugMode)
+		removeIpv6CIDR(svcEC2, resEC2, idx, "::/0", debugMode)
 	} // finished loop
 
 	// ------------------------------------------
